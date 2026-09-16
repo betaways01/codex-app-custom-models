@@ -1,0 +1,22 @@
+# Secrets — never commit real keys
+.env
+.env.local
+*.secret
+*.key
+*credentials*
+configs/opencodex/config.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+
+# Runtime dumps that can contain tokens
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+usage.jsonl
+service.log
+ocx.pid

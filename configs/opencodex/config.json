@@ -1,0 +1,388 @@
+{
+  "port": 10100,
+  "defaultProvider": "openai",
+  "emptyCompletionRetry": true,
+  "codexAutoStart": true,
+  "websockets": false,
+  "providers": {
+    "openai": {
+      "adapter": "openai-responses",
+      "baseUrl": "https://chatgpt.com/backend-api/codex",
+      "codexAccountMode": "direct",
+      "authMode": "forward"
+    },
+    "xai": {
+      "adapter": "openai-chat",
+      "baseUrl": "https://api.x.ai/v1",
+      "authMode": "oauth",
+      "defaultModel": "grok-4.6",
+      "models": [
+        "grok-4.6",
+        "grok-4.5"
+      ],
+      "liveModels": true,
+      "modelContextWindows": {
+        "grok-4.6": 500000,
+        "grok-4.5": 500000
+      },
+      "modelInputModalities": {
+        "grok-4.6": [
+          "text",
+          "image"
+        ],
+        "grok-4.5": [
+          "text",
+          "image"
+        ]
+      },
+      "modelReasoningEfforts": {
+        "grok-4.6": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "grok-4.5": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "modelDefaultReasoningEfforts": {
+        "grok-4.6": "high"
+      },
+      "modelReasoningEffortMap": {
+        "grok-4.6": {
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "xhigh",
+          "ultra": "xhigh"
+        },
+        "grok-4.5": {
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high",
+          "ultra": "high"
+        }
+      },
+      "preserveReasoningContentModels": [
+        "grok-4.6",
+        "grok-4.5"
+      ],
+      "selectedModels": [
+        "grok-4.6"
+      ]
+    },
+    "deepseek": {
+      "adapter": "openai-chat",
+      "baseUrl": "https://api.deepseek.com",
+      "responsesPath": "/responses",
+      "statelessResponses": true,
+      "requiresAdjacentResponsesToolResults": true,
+      "authMode": "key",
+      "apiKey": "YOUR_DEEPSEEK_API_KEY_HERE",
+      "defaultModel": "deepseek-flash",
+      "models": [
+        "deepseek-flash",
+        "deepseek-v4-pro"
+      ],
+      "modelContextWindows": {
+        "deepseek-flash": 1048576,
+        "deepseek-v4-pro": 1048576
+      },
+      "modelInputModalities": {
+        "deepseek-flash": [
+          "text",
+          "image"
+        ]
+      },
+      "modelReasoningEfforts": {
+        "deepseek-flash": [
+          "low",
+          "high",
+          "max"
+        ],
+        "deepseek-v4-pro": [
+          "low",
+          "high",
+          "max"
+        ]
+      },
+      "modelReasoningEffortMap": {
+        "deepseek-flash": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "high",
+          "max": "max"
+        },
+        "deepseek-v4-pro": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "high",
+          "max": "max"
+        }
+      },
+      "modelDefaultReasoningEfforts": {
+        "deepseek-flash": "high",
+        "deepseek-v4-pro": "high"
+      },
+      "noVisionModels": [
+        "deepseek-v4-pro"
+      ],
+      "preserveReasoningContentModels": [
+        "deepseek-flash",
+        "deepseek-v4-pro"
+      ],
+      "selectedModels": [
+        "deepseek-flash"
+      ]
+    },
+    "mimo": {
+      "adapter": "openai-chat",
+      "baseUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+      "authMode": "key",
+      "apiKey": "YOUR_MIMO_API_KEY_HERE",
+      "defaultModel": "mimo-v2.5",
+      "models": [
+        "mimo-v2.5",
+        "mimo-v2.5-pro"
+      ],
+      "modelContextWindows": {
+        "mimo-v2.5": 1048576,
+        "mimo-v2.5-pro": 1048576
+      },
+      "modelInputModalities": {
+        "mimo-v2.5": [
+          "text",
+          "image"
+        ],
+        "mimo-v2.5-pro": [
+          "text"
+        ]
+      },
+      "modelReasoningEfforts": {
+        "mimo-v2.5": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "mimo-v2.5-pro": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "modelReasoningEffortMap": {
+        "mimo-v2.5": {
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high",
+          "ultra": "high"
+        },
+        "mimo-v2.5-pro": {
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high",
+          "ultra": "high"
+        }
+      },
+      "modelDefaultReasoningEfforts": {
+        "mimo-v2.5": "high",
+        "mimo-v2.5-pro": "high"
+      },
+      "noVisionModels": [
+        "mimo-v2.5-pro"
+      ],
+      "preserveReasoningContentModels": [
+        "mimo-v2.5",
+        "mimo-v2.5-pro"
+      ],
+      "selectedModels": [
+        "mimo-v2.5",
+        "mimo-v2.5-pro"
+      ]
+    },
+    "zai": {
+      "adapter": "openai-chat",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "authMode": "key",
+      "apiKey": "YOUR_GLM_API_KEY_HERE",
+      "defaultModel": "glm-5.3",
+      "models": [
+        "glm-5.3",
+        "glm-5.3-flash"
+      ],
+      "modelContextWindows": {
+        "glm-5.3": 1000000,
+        "glm-5.3-flash": 1000000
+      },
+      "modelInputModalities": {
+        "glm-5.3": [
+          "text"
+        ],
+        "glm-5.3-flash": [
+          "text",
+          "image"
+        ]
+      },
+      "modelReasoningEfforts": {
+        "glm-5.3": [
+          "low",
+          "high",
+          "max"
+        ],
+        "glm-5.3-flash": [
+          "low",
+          "high",
+          "max"
+        ]
+      },
+      "modelReasoningEffortMap": {
+        "glm-5.3": {
+          "minimal": "low",
+          "medium": "high",
+          "xhigh": "max",
+          "ultra": "max"
+        },
+        "glm-5.3-flash": {
+          "minimal": "low",
+          "medium": "high",
+          "xhigh": "max",
+          "ultra": "max"
+        }
+      },
+      "modelDefaultReasoningEfforts": {
+        "glm-5.3": "max",
+        "glm-5.3-flash": "high"
+      },
+      "preserveReasoningContentModels": [
+        "glm-5.3",
+        "glm-5.3-flash"
+      ],
+      "selectedModels": [
+        "glm-5.3",
+        "glm-5.3-flash"
+      ]
+    }
+  },
+  "combos": {
+    "grok-desktop": {
+      "strategy": "failover",
+      "stickyLimit": 1,
+      "defaultEffort": "high",
+      "targets": [
+        {
+          "provider": "xai",
+          "model": "grok-4.6",
+          "weight": 1
+        }
+      ],
+      "alias": "gpt-5.6-sol",
+      "nativeAlias": true,
+      "displayName": "Grok 4.6"
+    },
+    "deepseek-desktop": {
+      "strategy": "failover",
+      "stickyLimit": 1,
+      "defaultEffort": "high",
+      "targets": [
+        {
+          "provider": "deepseek",
+          "model": "deepseek-flash",
+          "weight": 1
+        }
+      ],
+      "alias": "gpt-5.6-luna",
+      "nativeAlias": true,
+      "displayName": "DeepSeek V4.1 Flash"
+    },
+    "mimo-desktop": {
+      "strategy": "failover",
+      "stickyLimit": 1,
+      "defaultEffort": "high",
+      "targets": [
+        {
+          "provider": "mimo",
+          "model": "mimo-v2.5",
+          "weight": 1
+        }
+      ],
+      "displayName": "MiMo V2.5"
+    },
+    "mimo-pro-desktop": {
+      "strategy": "failover",
+      "stickyLimit": 1,
+      "defaultEffort": "high",
+      "targets": [
+        {
+          "provider": "mimo",
+          "model": "mimo-v2.5-pro",
+          "weight": 1
+        }
+      ],
+      "displayName": "MiMo V2.5 Pro"
+    },
+    "glm-53-desktop": {
+      "strategy": "failover",
+      "stickyLimit": 1,
+      "defaultEffort": "max",
+      "targets": [
+        {
+          "provider": "zai",
+          "model": "glm-5.3",
+          "weight": 1
+        }
+      ],
+      "displayName": "GLM 5.3"
+    },
+    "glm-53-flash-desktop": {
+      "strategy": "failover",
+      "stickyLimit": 1,
+      "defaultEffort": "high",
+      "targets": [
+        {
+          "provider": "zai",
+          "model": "glm-5.3-flash",
+          "weight": 1
+        }
+      ],
+      "displayName": "GLM 5.3 Flash"
+    }
+  },
+  "modelPickerOrder": [
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "combo/mimo-desktop",
+    "combo/mimo-pro-desktop",
+    "combo/glm-53-desktop",
+    "combo/glm-53-flash-desktop"
+  ],
+  "subagentModels": [
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "combo/mimo-desktop",
+    "combo/mimo-pro-desktop"
+  ],
+  "disabledModels": [
+    "xai/grok-4.6",
+    "xai/grok-4.5",
+    "deepseek/deepseek-flash",
+    "deepseek/deepseek-v4-pro",
+    "mimo/mimo-v2.5",
+    "mimo/mimo-v2.5-pro",
+    "zai/glm-5.3",
+    "zai/glm-5.3-flash"
+  ]
+}

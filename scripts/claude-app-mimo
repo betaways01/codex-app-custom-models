@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Optional Claude Code / Claude App helper. Reads the MiMo key from the
+# environment or from ~/.opencodex/config.json — never hard-code a live key.
+
+MIMO_KEY="${MIMO_API_KEY:-${ANTHROPIC_API_KEY:-}}"
+if [ -z "$MIMO_KEY" ] && [ -f "${HOME}/.opencodex/config.json" ]; then
+  MIMO_KEY=$(python3 - << 'PY'
+import json, os
+cfg = json.load(open(os.path.expanduser("~/.opencodex/config.json")))
+key = (cfg.get("providers") or {}).get("mimo", {}).get("apiKey") or ""
+ph = "YOUR_MIMO_API_KEY_HERE"
+print("" if key == ph else key)
+PY
+)
+fi
+if [ -z "$MIMO_KEY" ]; then
+  echo "Set MIMO_API_KEY or put a MiMo key in ~/.opencodex/config.json" >&2
+  exit 1
+fi
+export ANTHROPIC_API_KEY="$MIMO_KEY"
+export ANTHROPIC_BASE_URL="https://token-plan-sgp.xiaomimimo.com/anthropic"
+export CLAUDE_CODE_DISABLE_GATEWAY=1
+
+# macOS desktop app. Linux/Windows: use claude-mimo instead.
+CLAUDE_BIN="${CLAUDE_APP_BIN:-/Applications/Claude.app/Contents/MacOS/Claude}"
+if [ ! -x "$CLAUDE_BIN" ]; then
+  echo "Claude.app not found at $CLAUDE_BIN" >&2
+  exit 1
+fi
+pkill -x Claude 2>/dev/null || true
+sleep 1
+exec "$CLAUDE_BIN"
