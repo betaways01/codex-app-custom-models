@@ -82,6 +82,20 @@ Quit Codex completely, reopen, pick a model.
 - Quick / free: Grok 4.6.
 
 Default effort in this template is high except GLM 5.3 (max).
+## Screenshot-heavy threads (upstream 413)
+
+Codex resends every screenshot in a thread on every turn. Providers cap the **request body**, not
+the token window, so a thread full of screenshots can die with 413 Payload Too Large long before
+it runs out of context. Measured against DeepSeek: 47.9 MiB accepted, 48 MiB rejected.
+
+patches/opencodex-image-budget/ applies the resize ladder OpenCodex already ships for Anthropic
+to every routed vision provider, so the image payload stays under the provider limit while every
+screenshot still reaches the model. See patches/opencodex-image-budget/README.md.
+
+    python3 patches/opencodex-image-budget/apply.py
+    opencodex restart
+
+setup.sh applies it automatically. Re-run after every opencodex update.
 
 ## Adding another provider
 
@@ -106,7 +120,7 @@ Never copy ~/.opencodex/config.json into configs/ and push. That publishes your 
 | Reconnecting / 502 | opencodex status then opencodex restart. Confirm the key is not a placeholder. |
 | Model missing | opencodex sync. Quit and reopen Codex. |
 | 401 | New key at the provider site; paste into ~/.opencodex/config.json. |
-| 413 payload too large | Too many screenshots in one thread. Start a new thread; keep 1-2 current images. |
+| 413 payload too large | Apply patches/opencodex-image-budget (bounds image bytes automatically). |
 | Port in use | lsof -i :10100 |
 
 Run ./scripts/validate.sh and ./scripts/health-check.sh after setup.

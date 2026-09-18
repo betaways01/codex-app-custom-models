@@ -24,6 +24,11 @@ if ! command -v opencodex >/dev/null 2>&1; then
 fi
 ok "opencodex $(opencodex --version 2>/dev/null || echo installed)"
 
+# Apply bundled patches (re-run after every "opencodex update")
+if [ -d "$ROOT/patches" ]; then
+  bash "$ROOT/scripts/apply-patches.sh" || warn "Patch step failed; see patches/README"
+fi
+
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 OPENCODEX_HOME="${OPENCODEX_HOME:-$HOME/.opencodex}"
 mkdir -p "$OPENCODEX_HOME" "$CODEX_HOME"
