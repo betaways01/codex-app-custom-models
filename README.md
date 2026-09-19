@@ -134,6 +134,8 @@ Run ./scripts/validate.sh and ./scripts/health-check.sh after setup.
 | scripts/setup.sh | Portable installer |
 | scripts/validate.sh | Config check |
 | scripts/health-check.sh | Live proxy ping |
+| scripts/apply-patches.sh | Apply every bundled patch (re-run after opencodex updates) |
+| patches/opencodex-image-budget/ | Fix for upstream 413 on screenshot-heavy threads |
 | scripts/claude-mimo* | Optional Claude Code wrappers (read key from env or local config) |
 | install.sh | curl installer |
 

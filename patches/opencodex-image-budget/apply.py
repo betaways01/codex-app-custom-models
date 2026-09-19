@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -40,6 +41,15 @@ ELSE_ADD = """
     // combined base64 is over budget, so ordinary requests are untouched.
     await enforceImageByteBudget(parsed);
   }"""
+
+
+def package_version(root: Path) -> str:
+    """Report the installed opencodex version, for support and upgrade notes."""
+    try:
+        data = json.loads((root / "package.json").read_text())
+        return str(data.get("version") or "unknown")
+    except Exception:
+        return "unknown"
 
 
 def detect_root() -> Path:
@@ -105,7 +115,8 @@ def main() -> int:
     applied = (root / MODULE_DST).is_file() and "enforceImageByteBudget(parsed)" in core.read_text()
 
     if args.check:
-        print(("applied" if applied else "not applied") + ": " + str(root))
+        state = "applied" if applied else "not applied"
+        print(state + "  opencodex " + package_version(root) + "  " + str(root))
         return 0 if applied else 1
 
     if applied:
@@ -123,7 +134,7 @@ def main() -> int:
     core_text = core.read_text()
     core.write_text(core_edit(import_edit(core_text)))
 
-    print("patched: " + str(root))
+    print("patched: " + str(root) + "  (opencodex " + package_version(root) + ")")
     print("restart the proxy to load it:  opencodex restart")
     return 0
 
