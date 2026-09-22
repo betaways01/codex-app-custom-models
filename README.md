@@ -77,7 +77,7 @@ Quit Codex completely, reopen, pick a model.
 ## Which model
 
 - Daily coding: MiMo V2.5 Pro (flat plan) or DeepSeek V4.1 Flash (cheap cache-heavy API).
-- Screenshots: MiMo V2.5 or DeepSeek V4.1 Flash. Keep image threads short; old screenshots bloat the HTTP body.
+- Screenshots: MiMo V2.5 or DeepSeek V4.1 Flash. The image patch keeps this turn of screenshots and stubs older ones so the body stays small and DeepSeek cache holds.
 - Hard reasoning: GLM 5.3, or DeepSeek at effort max for one turn, then back to high.
 - Quick / free: Grok 4.6.
 

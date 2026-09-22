@@ -1,55 +1,80 @@
 /**
- * Byte-budget guard for image-heavy requests on providers that accept images natively.
+ * Current-turn image policy for vision-capable routed models.
  *
- * Codex histories accumulate full-resolution screenshots as base64 data URLs and resend the whole
- * set every turn. Upstreams cap the REQUEST BODY, not the token window: DeepSeek answers
- * `413 Failed to buffer the request body: length limit exceeded` (app tier) or openresty
- * `413 Request Entity Too Large` (edge), and xAI's edge does the same. Measured 2026-09-18:
- * DeepSeek accepts 47.9 MiB and rejects 48 MiB, so a healthy 1M-token thread dies on bytes long
- * before it dies on context.
+ * Codex resends every screenshot as a base64 data URL on every turn. Two failures follow:
+ *   1. Upstreams cap the REQUEST BODY, not the token window. DeepSeek accepts 47.9 MiB and
+ *      413s at 48 MiB; xAI's edge does the same for Grok.
+ *   2. DeepSeek cache-miss costs 50x a cache-hit. Any rewrite of an early screenshot invalidates
+ *      the entire cached prefix, which is how the previous age-tier ladder made long frontend
+ *      threads expensive.
  *
- * The Anthropic adapter already solves this with a resize ladder
- * (adapters/anthropic-image-normalize.ts); this module applies the same proven machinery to the
- * wire-neutral parsed request, so every routed vision provider is protected without changing what
- * the model is asked to do.
+ * Default policy matches a frontend sprint: view, understand, work, test, forget.
+ *   - Images in the latest user/developer message, and anything after it (current-turn tool
+ *     screenshots), are kept.
+ *   - Images in earlier messages become a fixed one-line stub. The stub string never changes, so
+ *     once a turn ages out the prefix is append-only again.
+ *   - Kept images are encoded at most once (max edge 1280 px JPEG), content-addressed in process
+ *     so retries of the same turn send identical bytes. New screenshots sit at the END of the
+ *     prefix and cannot bust cache.
+ *   - Emergency body cap ~40 MiB on the kept set (DeepSeek's wall is ~48 MiB).
  *
- * Contract:
- * - No-op unless data-URL images exist AND their combined base64 exceeds the budget.
- * - Images stay visible. Newest keep the highest fidelity; older ones become smaller JPEGs.
- * - Only when every image is terminal-floored and the total still exceeds the budget are the OLDEST
- *   replaced with a one-line note.
- * - Never throws into the request path: any failure keeps the original payload.
+ * This function is only called for vision-capable models. Text-only models use the sidecar/strip
+ * path in vision/index.ts and are untouched. Fail open: any internal error keeps the original
+ * payload.
+ *
+ * Kill switches:
+ *   OCX_IMAGE_BUDGET=off          disable everything
+ *   OCX_IMAGE_HISTORY=keep        do not stub history; freeze-encode all images (escape hatch)
+ *   OCX_IMAGE_BUDGET_MB           emergency cap, default 40
+ *   OCX_IMAGE_MAX_EDGE            kept-image longest side, default 1280
  */
 
+import { createHash } from "node:crypto";
 import type { OcxContentPart, OcxImageContent, OcxParsedRequest, OcxTextContent } from "../types";
-import { normalizeImageTargets, type NormalizeTarget } from "../adapters/anthropic-image-normalize";
 
-/** Image share of the body. Mirrors the Anthropic total-image budget; DeepSeek's wall is ~48 MiB. */
-export const DEFAULT_IMAGE_BASE64_BUDGET = 20 * 1024 * 1024;
+/** Emergency cap on the kept (current-turn) image share. DeepSeek's wall is ~48 MiB. */
+export const DEFAULT_IMAGE_BASE64_BUDGET = 40 * 1024 * 1024;
+export const DEFAULT_MAX_EDGE = 1280;
+export const DEFAULT_JPEG_QUALITY = 70;
+export const MAX_REENCODED_IMAGES = 80;
 
-const DROPPED_IMAGE_TEXT =
-  "[image omitted: request byte budget exceeded; oldest screenshot replaced to keep the request inside the provider's body limit]";
+/** Stable stub. Must stay byte-identical across turns so the prefix can cache. */
+export const STALE_IMAGE_TEXT = "[earlier screenshot omitted]";
 
-/**
- * Hard ceiling on how many images are re-encoded in a single pass. Decoding + re-encoding is
- * CPU-bound (~90 ms per full-res screenshot on an M-series core), so an unbounded pass over a
- * pathological thread would stall the turn for minutes. Anything past this count is the OLDEST
- * surplus and is replaced with a note instead of re-encoded. Real Codex threads observed in
- * practice run 8-60 images, so this ceiling is far above normal use.
- */
-export const MAX_REENCODED_IMAGES = 150;
+const OVERFLOW_IMAGE_TEXT = "[screenshot omitted: current-turn image budget exceeded]";
 
-const SURPLUS_IMAGE_TEXT =
-  "[image omitted: too many screenshots in one request; the oldest ones were dropped to keep the request inside the provider's body limit]";
+const PASS_THROUGH_BASE64 = 400 * 1024;
 
-function envBudgetBytes(): number | null {
+function envOff(): boolean {
   const off = process.env.OCX_IMAGE_BUDGET;
-  if (off !== undefined && ["off", "0", "false", "no"].includes(off.trim().toLowerCase())) return null;
+  return off !== undefined && ["off", "0", "false", "no"].includes(off.trim().toLowerCase());
+}
+
+function envKeepHistory(): boolean {
+  const raw = process.env.OCX_IMAGE_HISTORY;
+  return raw !== undefined && ["keep", "all", "full"].includes(raw.trim().toLowerCase());
+}
+
+function envBudgetBytes(): number {
   const raw = process.env.OCX_IMAGE_BUDGET_MB;
   if (raw === undefined || raw.trim() === "") return DEFAULT_IMAGE_BASE64_BUDGET;
   const mb = Number(raw);
   if (!Number.isFinite(mb) || mb <= 0) return DEFAULT_IMAGE_BASE64_BUDGET;
   return Math.floor(mb * 1024 * 1024);
+}
+
+function envMaxEdge(): number {
+  const raw = process.env.OCX_IMAGE_MAX_EDGE;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_EDGE;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 320 ? Math.floor(n) : DEFAULT_MAX_EDGE;
+}
+
+function envJpegQuality(): number {
+  const raw = process.env.OCX_IMAGE_JPEG_QUALITY;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_JPEG_QUALITY;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 30 && n <= 90 ? Math.floor(n) : DEFAULT_JPEG_QUALITY;
 }
 
 interface DataUrlImage {
@@ -70,149 +95,271 @@ function parseDataUrlImage(url: string | undefined): DataUrlImage | null {
 }
 
 function toDataUrl(data: string, mediaType: string): string {
-  return `data:${mediaType};base64,${data}`;
+  return "data:" + mediaType + ";base64," + data;
 }
 
-/** Roles whose content parts may carry images (mirrors vision/index.ts carriesImages). */
 function carriesImages(role: string): boolean {
   return role === "user" || role === "developer" || role === "toolResult";
 }
 
-interface Slot {
-  parse(): DataUrlImage | null;
-  replace(url: string): void;
-  drop(note?: string): void;
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
-/**
- * Rewrite data-URL images anywhere in the raw (passthrough) body by value. The translated path
- * reads parsed.context.messages, but a provider on the passthrough wire forwards this verbatim, so
- * both views must agree. Matching by URL value keeps the two in sync even when their item counts
- * differ.
- */
-function syncRawBodyImages(
+interface FreezeEntry {
+  data: string;
+  mediaType: string;
+}
+
+const freezeCache = new Map<string, FreezeEntry>();
+const FREEZE_CACHE_MAX = 128;
+
+function freezeGet(key: string): FreezeEntry | undefined {
+  const hit = freezeCache.get(key);
+  if (!hit) return undefined;
+  freezeCache.delete(key);
+  freezeCache.set(key, hit);
+  return hit;
+}
+
+function freezeSet(key: string, value: FreezeEntry): void {
+  if (freezeCache.has(key)) freezeCache.delete(key);
+  freezeCache.set(key, value);
+  while (freezeCache.size > FREEZE_CACHE_MAX) {
+    const oldest = freezeCache.keys().next().value;
+    if (oldest === undefined) break;
+    freezeCache.delete(oldest);
+  }
+}
+
+/** Test seam: drop the in-process freeze cache. */
+export function resetImageFreezeCache(): void {
+  freezeCache.clear();
+}
+
+async function encodeFrozen(
+  decoded: DataUrlImage,
+  maxEdge: number,
+  quality: number,
+): Promise<FreezeEntry> {
+  const key = sha256(decoded.mediaType + "\0" + decoded.base64);
+  const cached = freezeGet(key);
+  if (cached) return cached;
+
+  let result: FreezeEntry = { data: decoded.base64, mediaType: decoded.mediaType };
+  try {
+    const input = Buffer.from(decoded.base64, "base64");
+    const image = new Bun.Image(input);
+    const meta = await image.metadata();
+    const w = typeof meta.width === "number" ? meta.width : 0;
+    const h = typeof meta.height === "number" ? meta.height : 0;
+    const oversized = w > maxEdge || h > maxEdge;
+    const bulky = decoded.base64.length > PASS_THROUGH_BASE64;
+    const passthroughType = decoded.mediaType === "image/jpeg"
+      || decoded.mediaType === "image/png"
+      || decoded.mediaType === "image/webp";
+
+    if (!oversized && !bulky && passthroughType) {
+      freezeSet(key, result);
+      return result;
+    }
+
+    let pipeline = new Bun.Image(input);
+    if (oversized && w > 0 && h > 0) {
+      const scale = maxEdge / Math.max(w, h);
+      pipeline = pipeline.resize(Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)));
+    }
+    const out = await pipeline.jpeg({ quality }).toBuffer();
+    result = { data: Buffer.from(out).toString("base64"), mediaType: "image/jpeg" };
+  } catch {
+    // fail open: keep the original bytes for this image
+  }
+  freezeSet(key, result);
+  return result;
+}
+
+interface Slot {
+  msgIndex: number;
+  partIndex: number;
+  url: string;
+  decoded: DataUrlImage;
+  current: boolean;
+}
+
+function collectSlots(parsed: OcxParsedRequest): Slot[] {
+  const messages = parsed.context.messages;
+  let lastUser = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const role = messages[i]?.role;
+    if (role === "user" || role === "developer") lastUser = i;
+  }
+  const slots: Slot[] = [];
+  for (let mi = 0; mi < messages.length; mi++) {
+    const msg = messages[mi];
+    if (!msg || !carriesImages(msg.role) || !Array.isArray(msg.content)) continue;
+    const parts = msg.content as OcxContentPart[];
+    const current = lastUser === -1 ? true : mi >= lastUser;
+    for (let pi = 0; pi < parts.length; pi++) {
+      const part = parts[pi];
+      if (!part || part.type !== "image") continue;
+      const decoded = parseDataUrlImage((part as OcxImageContent).imageUrl);
+      if (!decoded) continue;
+      slots.push({
+        msgIndex: mi,
+        partIndex: pi,
+        url: (part as OcxImageContent).imageUrl,
+        decoded,
+        current,
+      });
+    }
+  }
+  return slots;
+}
+
+function replacePart(parsed: OcxParsedRequest, slot: Slot, next: OcxContentPart): void {
+  const msg = parsed.context.messages[slot.msgIndex];
+  if (!msg || !Array.isArray(msg.content)) return;
+  (msg.content as OcxContentPart[])[slot.partIndex] = next;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function syncRawBody(
   raw: unknown,
   replacements: Map<string, string>,
+  stubs: Map<string, string>,
 ): void {
-  const visit = (value: unknown): void => {
+  const rewriteUrl = (url: string): { kind: "replace"; url: string } | { kind: "stub"; text: string } | null => {
+    const stub = stubs.get(url);
+    if (stub !== undefined) return { kind: "stub", text: stub };
+    const next = replacements.get(url);
+    if (next !== undefined) return { kind: "replace", url: next };
+    return null;
+  };
+
+  const visit = (value: unknown): unknown => {
     if (Array.isArray(value)) {
-      for (const entry of value) visit(entry);
-      return;
+      let changed = false;
+      const next = value.map(entry => {
+        const rewritten = visit(entry);
+        if (rewritten !== entry) changed = true;
+        return rewritten;
+      });
+      return changed ? next : value;
     }
-    if (typeof value !== "object" || value === null) return;
-    const record = value as Record<string, unknown>;
-    const type = typeof record.type === "string" ? record.type : "";
-    if (type === "input_image" || type === "image_url" || type === "image") {
-      const url = typeof record.image_url === "string"
-        ? record.image_url
-        : (typeof record.image_url === "object" && record.image_url !== null
-          ? (record.image_url as Record<string, unknown>).url
-          : undefined);
+    if (!isPlainRecord(value)) return value;
+    const type = typeof value.type === "string" ? value.type : "";
+
+    if (type === "input_image" && typeof value.image_url === "string") {
+      const action = rewriteUrl(value.image_url);
+      if (action?.kind === "stub") return { type: "input_text", text: action.text };
+      if (action?.kind === "replace") return { ...value, image_url: action.url };
+      return value;
+    }
+    if (type === "image_url" || type === "image" || type === "input_image") {
+      const url = typeof value.image_url === "string"
+        ? value.image_url
+        : (isPlainRecord(value.image_url) && typeof value.image_url.url === "string"
+          ? value.image_url.url
+          : (typeof value.url === "string" ? value.url : undefined));
       if (typeof url === "string") {
-        const next = replacements.get(url);
-        if (next !== undefined) {
-          if (typeof record.image_url === "string") record.image_url = next;
-          else (record.image_url as Record<string, unknown>).url = next;
+        const action = rewriteUrl(url);
+        if (action?.kind === "stub") {
+          return type === "input_image"
+            ? { type: "input_text", text: action.text }
+            : { type: "text", text: action.text };
+        }
+        if (action?.kind === "replace") {
+          if (typeof value.image_url === "string") return { ...value, image_url: action.url };
+          if (isPlainRecord(value.image_url)) {
+            return { ...value, image_url: { ...value.image_url, url: action.url } };
+          }
+          return { ...value, url: action.url };
         }
       }
     }
-    for (const key of Object.keys(record)) {
-      if (key === "image_url") continue;
-      visit(record[key]);
+    let changed = false;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      const rewritten = visit(value[key]);
+      out[key] = rewritten;
+      if (rewritten !== value[key]) changed = true;
     }
+    return changed ? out : value;
   };
-  visit(raw);
+
+  if (!isPlainRecord(raw)) {
+    visit(raw);
+    return;
+  }
+  const next = visit(raw);
+  if (next !== raw && isPlainRecord(next)) {
+    for (const key of Object.keys(raw)) delete (raw as Record<string, unknown>)[key];
+    Object.assign(raw, next);
+  }
 }
 
-/**
- * Shrink the image share of a routed request so the upstream body cannot exceed the provider's
- * limit. Returns true when anything was rewritten. Safe to call on every request: it measures
- * first and returns immediately when the payload is already inside the budget.
- */
 export async function enforceImageByteBudget(parsed: OcxParsedRequest): Promise<boolean> {
   try {
+    if (envOff()) return false;
+
+    const slots = collectSlots(parsed);
+    if (slots.length === 0) return false;
+
+    const keepHistory = envKeepHistory();
     const budget = envBudgetBytes();
-    if (budget === null) return false;
+    const maxEdge = envMaxEdge();
+    const quality = envJpegQuality();
+    const replacements = new Map<string, string>();
+    const stubs = new Map<string, string>();
+    let changed = false;
 
-    const slots: Slot[] = [];
-    let total = 0;
+    const stale = keepHistory ? [] : slots.filter(s => !s.current);
+    const kept = keepHistory ? slots : slots.filter(s => s.current);
 
-    for (const msg of parsed.context.messages) {
-      if (!carriesImages(msg.role) || !Array.isArray(msg.content)) continue;
-      const parts = msg.content as OcxContentPart[];
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        if (!part || part.type !== "image") continue;
-        const imagePart = part as OcxImageContent;
-        const decoded = parseDataUrlImage(imagePart.imageUrl);
-        if (!decoded) continue;
-        total += decoded.base64.length;
-        const index = i;
-        const url = imagePart.imageUrl;
-        slots.push({
-          parse: () => parseDataUrlImage((parts[index] as OcxImageContent | undefined)?.imageUrl),
-          replace: (next: string) => {
-            const current = parts[index];
-            if (current && current.type === "image") (current as OcxImageContent).imageUrl = next;
-          },
-          drop: (note?: string) => {
-            const replacement: OcxContentPart = { type: "text", text: note ?? DROPPED_IMAGE_TEXT } as OcxTextContent;
-            parts[index] = replacement;
-          },
-        });
-        void url;
+    for (const slot of stale) {
+      replacePart(parsed, slot, { type: "text", text: STALE_IMAGE_TEXT } as OcxTextContent);
+      stubs.set(slot.url, STALE_IMAGE_TEXT);
+      changed = true;
+    }
+
+    const encoded: { slot: Slot; nextUrl: string; size: number }[] = [];
+    for (let i = 0; i < kept.length; i++) {
+      const slot = kept[i];
+      if (i >= MAX_REENCODED_IMAGES) {
+        replacePart(parsed, slot, { type: "text", text: OVERFLOW_IMAGE_TEXT } as OcxTextContent);
+        stubs.set(slot.url, OVERFLOW_IMAGE_TEXT);
+        changed = true;
+        continue;
+      }
+      const frozen = await encodeFrozen(slot.decoded, maxEdge, quality);
+      encoded.push({ slot, nextUrl: toDataUrl(frozen.data, frozen.mediaType), size: frozen.data.length });
+    }
+
+    // Drop oldest current-turn images only when the kept set still exceeds the body cap.
+    let total = encoded.reduce((sum, item) => sum + item.size, 0);
+    for (const item of encoded) {
+      if (total > budget) {
+        replacePart(parsed, item.slot, { type: "text", text: OVERFLOW_IMAGE_TEXT } as OcxTextContent);
+        stubs.set(item.slot.url, OVERFLOW_IMAGE_TEXT);
+        total -= item.size;
+        changed = true;
+        continue;
+      }
+      if (item.nextUrl !== item.slot.url) {
+        replacePart(parsed, item.slot, { type: "image", imageUrl: item.nextUrl } as OcxImageContent);
+        replacements.set(item.slot.url, item.nextUrl);
+        changed = true;
       }
     }
 
-    if (slots.length === 0 || total <= budget) return false;
-
-    // Bound the re-encode work: drop the oldest surplus before the ladder runs so the guarantee
-    // (total <= budget) still holds without an unbounded CPU pass.
-    const surplus = slots.length - MAX_REENCODED_IMAGES;
-    if (surplus > 0) {
-      for (let i = 0; i < surplus; i++) slots[i]?.drop(SURPLUS_IMAGE_TEXT);
+    if (changed && parsed._rawBody !== undefined) {
+      syncRawBody(parsed._rawBody, replacements, stubs);
     }
-
-    const originals = new Map<number, string>();
-    slots.forEach((slot, index) => {
-      const decoded = slot.parse();
-      if (decoded) originals.set(index, toDataUrl(decoded.base64, decoded.mediaType));
-    });
-
-    const targets: NormalizeTarget[] = slots.map(slot => ({
-      get base64(): string | null {
-        return slot.parse()?.base64 ?? null;
-      },
-      get mediaType(): string {
-        return slot.parse()?.mediaType ?? "image/png";
-      },
-      replace: (data: string, mediaType: string) => slot.replace(toDataUrl(data, mediaType)),
-      drop: (note: string) => slot.drop(note),
-    }));
-
-    await normalizeImageTargets(targets, {
-      // No processLimit: the ladder's aggregate loop needs EVERY image counted to guarantee the
-      // total. (Anthropic passes 100 because its guard textifies the surplus afterwards; there is
-      // no downstream guard here, so skipped images would silently stay full-size and overflow.)
-      budget,
-      overflowAction: "drop",
-    });
-
-    // Keep the passthrough view consistent with the translated one.
-    const replacements = new Map<string, string>();
-    slots.forEach((slot, index) => {
-      const before = originals.get(index);
-      if (before === undefined) return;
-      const decoded = slot.parse();
-      if (decoded) replacements.set(before, toDataUrl(decoded.base64, decoded.mediaType));
-    });
-    if (replacements.size > 0 && parsed._rawBody !== undefined) {
-      syncRawBodyImages(parsed._rawBody, replacements);
-    }
-
-    return true;
+    return changed;
   } catch {
-    // fail open: a broken guard must never block the request
     return false;
   }
 }

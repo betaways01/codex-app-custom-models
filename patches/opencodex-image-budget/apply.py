@@ -3,10 +3,10 @@
 Wire the image byte-budget guard into an installed @bitkyc08/opencodex.
 
 Why: Codex resends every screenshot as base64 on every turn. Upstreams cap the
-REQUEST BODY (DeepSeek accepts 47.9 MiB, rejects 48 MiB), not the token window, so a
-screenshot-heavy thread dies with 413 long before it runs out of context. Anthropic
-already ships a resize ladder; this makes the same ladder apply to every routed
-vision provider. No-op unless the image payload is already over budget.
+REQUEST BODY (DeepSeek accepts 47.9 MiB, rejects 48 MiB). The previous age-tier
+resize ladder also rewrote early screenshots and busted DeepSeek's 50x cache.
+This patch stubs images from prior turns (stable one-line note), freeze-encodes
+the current turn, and keeps an emergency 40 MiB cap.
 
 Usage:
     python3 apply.py                 # detect the global install and patch it
@@ -119,16 +119,17 @@ def main() -> int:
         print(state + "  opencodex " + package_version(root) + "  " + str(root))
         return 0 if applied else 1
 
-    if applied:
-        print("already applied, nothing to do: " + str(root))
-        return 0
-
     if not MODULE_SRC.is_file():
         raise SystemExit("missing module source next to apply.py: " + str(MODULE_SRC))
 
     dst = root / MODULE_DST
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(MODULE_SRC, dst)
+
+    if applied:
+        print("updated image-budget.ts at " + str(root) + "  (opencodex " + package_version(root) + ")")
+        print("restart the proxy to load it:  opencodex restart")
+        return 0
 
     idx.write_text(index_edit(idx.read_text()))
     core_text = core.read_text()

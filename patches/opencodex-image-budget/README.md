@@ -1,60 +1,44 @@
-# Patch: image byte budget (fixes upstream 413 on screenshot-heavy threads)
+# Patch: current-turn images (413 + cache)
 
-Makes screenshot-heavy Codex threads work on providers that cap the request body. Applies the
-resize ladder OpenCodex already ships for Anthropic to every routed vision provider.
+Keeps screenshot-heavy Codex threads working on DeepSeek, Grok, MiMo, and GLM Flash
+without blowing the request-body cap or busting DeepSeek prefix cache.
 
 ## The problem
 
-Codex keeps every screenshot in the thread as a base64 data URL and resends the whole set on every
-turn. Providers cap the **request body**, not the token window, so a thread dies on bytes long
-before it runs out of context.
+Codex resends every screenshot as a base64 data URL on every turn.
 
-Measured 2026-09-18 against https://api.deepseek.com using an invalid-model probe (a rejected
-request bills nothing, so this cost $0):
+1. Providers cap the **request body**, not the token window. DeepSeek accepts 47.9 MiB
+   and 413s at 48 MiB. About 9-10 full-resolution screenshots hit the wall.
+2. DeepSeek cache-miss is **50x** a cache-hit. The previous age-tier resize ladder
+   rewrote early screenshots whenever a new one arrived, which invalidated the entire
+   cached prefix. Long frontend threads then billed like cold starts.
 
-| Request body | Result |
-|---|---|
-| 40 MiB | accepted |
-| 47.9 MiB | accepted |
-| 48 MiB | 413 Failed to buffer the request body: length limit exceeded |
+## What the patch does (default)
 
-The edge proxy returns the other flavour, 413 Request Entity Too Large (openresty / nginx). xAI
-does the same for Grok. In practice that is about 9-10 full-resolution screenshots per request.
+Frontend sprint: view, understand, work, test, forget.
 
-## What the patch does
+- Images in the **latest user/developer message**, plus tool screenshots after it, stay.
+- Images from **earlier turns** become the fixed stub `[earlier screenshot omitted]`.
+  The string never changes, so the prefix is append-only after each turn ages out.
+- Kept images are encoded at most once (max edge 1280 px JPEG), content-addressed
+  in process. New screenshots sit at the **end** of the prefix and cannot bust cache.
+- Emergency cap **40 MiB** on the kept set (DeepSeek wall ~48 MiB).
+- Text-only models are untouched (sidecar / strip path).
+- Never throws. Set OCX_IMAGE_BUDGET=off to disable.
 
-- Runs before the adapter builds the wire body, on the wire-neutral parsed request, so every
-  routed vision provider is covered (DeepSeek, MiMo, Grok, any openai-chat or responses provider).
-- Age-tier resize ladder, reusing src/adapters/anthropic-image-normalize.ts:
-  - newest 6 images: up to 2000 px JPEG
-  - next 14: 1024 px
-  - the rest: 700 px, then progressively smaller if the total still exceeds the budget
-- Total image budget: **20 MiB** of base64 by default, well under the ~48 MiB wall.
-- Oldest images become a one-line note only after every image is terminal-floored and the total is
-  still over budget.
-- Bounded CPU: at most **150** images re-encoded per pass; the oldest surplus becomes a note.
-- **No-op unless the images are already over budget**, so ordinary requests are untouched.
-- **Never throws**: any internal failure keeps the original payload.
-
-## What does NOT change
-
-Routing, model selection, reasoning effort, tools, context window, compaction, and the prompt
-cache. The same image at the same tier always produces byte-identical output, so the request
-prefix stays stable and provider cache hits keep working.
+Routing, model selection, reasoning effort, tools, and compaction do not change.
 
 ## Apply
 
     python3 patches/opencodex-image-budget/apply.py
     opencodex restart
 
-Or apply every bundled patch:
+Or every bundled patch:
 
     bash scripts/apply-patches.sh
 
-The applier locates the global opencodex install automatically. Point it elsewhere with
---root /path/to/@bitkyc08/opencodex. It is idempotent: running it twice is safe.
-
-Check status (exit 0 when applied):
+The applier locates the global opencodex install. Re-running copies the latest
+module over an existing install.
 
     python3 patches/opencodex-image-budget/apply.py --check
 
@@ -65,42 +49,33 @@ Revert by reinstalling the package:
 
 ## After an opencodex update
 
-An opencodex update or npm reinstall replaces the package and removes the patch. Re-run the apply
-script. setup.sh already calls scripts/apply-patches.sh, so a fresh clone is covered.
+Re-run the apply script. setup.sh already calls scripts/apply-patches.sh.
 
 ## Tuning
 
-| Env var | Default | Meaning |
-|---|---|---|
-| OCX_IMAGE_BUDGET_MB | 20 | Total base64 budget for the image share of a request |
-| OCX_IMAGE_BUDGET | unset | off disables the guard entirely |
+- OCX_IMAGE_BUDGET (default unset): off disables the guard
+- OCX_IMAGE_HISTORY (default unset): keep freeze-encodes all history instead of stubbing old turns
+- OCX_IMAGE_BUDGET_MB (default 40): emergency cap on the kept image share
+- OCX_IMAGE_MAX_EDGE (default 1280): longest side for kept screenshots
+- OCX_IMAGE_JPEG_QUALITY (default 70): JPEG quality when re-encoding
 
-Lower it if a provider still 413s; raise it if the provider allows a larger body and you want more
-fidelity.
+OCX_IMAGE_HISTORY=keep is the escape hatch if a thread must keep seeing older
+screenshots. It still freeze-encodes so bytes do not change after first sight.
 
-## Verified
+## Why this is cheaper on DeepSeek
 
-Against opencodex 2.31.0 and DeepSeek V4.1 Flash:
+A 500k-token turn at 99% cache is about $0.002 off-peak. The same turn at 2% cache
+is about $0.08, sixteen cents in peak. Stubbing old images means each new screenshot
+is appended, not a rewrite of image 0, so cache can stay in the 99% band after the
+one-time aging-out of the previous turn.
 
-| Case | Before | After |
-|---|---|---|
-| 9 images, 47.8 MB | 200 (just under the wall) | 200 |
-| 10 images, 53.1 MB | 413 | 200, model counted 10 images |
-| 25 images, 132.8 MB | 413 | 200, all 25 retained |
-| 40 images, 212.5 MB | 413 | 200, upstream body 15.2 MB |
-| 53 images, 49.2 MB (a real broken thread shape) | 413 | 200 in 1.5 s |
-| 2 images, 10.6 MB | 200 | 200, guard returned in under 2 ms |
+## Tests
 
-Cost of the guard: under budget it is a measurement plus an early return (about 1 ms). Over budget
-it adds roughly 1 second per turn for 25 images, and at most about 15 s in the pathological 150+
-image case. Results are cached in-process by content and tier.
+    python3 patches/opencodex-image-budget/apply.py
+    bun patches/opencodex-image-budget/image-budget.test.ts
+
+The test file imports the installed module after apply.py has copied it.
 
 ## Platform notes
 
-- macOS and Linux. The applier uses python3 and falls back to python. The proxy bundles its own Bun.
-- Windows is untested. The package path layout is the only OS-specific part, handled by --root.
-
-## Upstream
-
-This is a local patch, not a fork. The durable fix is for OpenCodex to run its Anthropic ladder for
-all image-capable adapters. Report it upstream and drop this patch once it lands.
+macOS and Linux. Windows untested. The proxy bundles its own Bun.
