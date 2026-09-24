@@ -18,12 +18,16 @@
       "defaultModel": "grok-4.6",
       "models": [
         "grok-4.6",
-        "grok-4.5"
+        "grok-4.5",
+        "grok-4.7",
+        "grok-4.7-build-fast"
       ],
       "liveModels": true,
       "modelContextWindows": {
         "grok-4.6": 500000,
-        "grok-4.5": 500000
+        "grok-4.5": 500000,
+        "grok-4.7": 500000,
+        "grok-4.7-build-fast": 500000
       },
       "modelInputModalities": {
         "grok-4.6": [
@@ -31,6 +35,14 @@
           "image"
         ],
         "grok-4.5": [
+          "text",
+          "image"
+        ],
+        "grok-4.7": [
+          "text",
+          "image"
+        ],
+        "grok-4.7-build-fast": [
           "text",
           "image"
         ]
@@ -46,10 +58,24 @@
           "low",
           "medium",
           "high"
+        ],
+        "grok-4.7": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "grok-4.7-build-fast": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
         ]
       },
       "modelDefaultReasoningEfforts": {
-        "grok-4.6": "high"
+        "grok-4.6": "high",
+        "grok-4.7": "high",
+        "grok-4.7-build-fast": "high"
       },
       "modelReasoningEffortMap": {
         "grok-4.6": {
@@ -67,11 +93,31 @@
           "xhigh": "high",
           "max": "high",
           "ultra": "high"
+        },
+        "grok-4.7": {
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "xhigh",
+          "ultra": "xhigh",
+          "minimal": "low"
+        },
+        "grok-4.7-build-fast": {
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "xhigh",
+          "ultra": "xhigh",
+          "minimal": "low"
         }
       },
       "preserveReasoningContentModels": [
         "grok-4.6",
-        "grok-4.5"
+        "grok-4.5",
+        "grok-4.7",
+        "grok-4.7-build-fast"
       ],
       "selectedModels": [
         "grok-4.6"
@@ -359,9 +405,37 @@
         }
       ],
       "displayName": "GLM 5.3 Flash"
+    },
+    "grok-47-desktop": {
+      "strategy": "failover",
+      "stickyLimit": 1,
+      "defaultEffort": "high",
+      "targets": [
+        {
+          "provider": "xai",
+          "model": "grok-4.7",
+          "weight": 1
+        }
+      ],
+      "displayName": "Grok 4.7"
+    },
+    "grok-47-fast-desktop": {
+      "strategy": "failover",
+      "stickyLimit": 1,
+      "defaultEffort": "high",
+      "targets": [
+        {
+          "provider": "xai",
+          "model": "grok-4.7-build-fast",
+          "weight": 1
+        }
+      ],
+      "displayName": "Grok 4.7 Fast"
     }
   },
   "modelPickerOrder": [
+    "combo/grok-47-desktop",
+    "combo/grok-47-fast-desktop",
     "gpt-5.6-sol",
     "gpt-5.6-luna",
     "combo/mimo-desktop",

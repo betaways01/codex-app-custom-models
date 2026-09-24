@@ -8,7 +8,7 @@ This repository is a portable template. It contains no live API keys and no mach
 
 | Picker name | Provider model | Typical use |
 |---|---|---|
-| Grok 4.6 | grok-4.6 | Quick tasks (xAI OAuth) |
+| Grok 4.7 | grok-4.7 | Daily coding, low/medium/high/xhigh |
 | DeepSeek V4.1 Flash | deepseek-flash | Daily coding, 1M context, vision |
 | MiMo V2.5 | mimo-v2.5 | Coding + screenshots |
 | MiMo V2.5 Pro | mimo-v2.5-pro | Flat-rate daily coding |
