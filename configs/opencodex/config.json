@@ -349,11 +349,12 @@
           "low",
           "medium",
           "high",
-          "xhigh"
+          "xhigh",
+          "max"
         ]
       },
       "modelDefaultReasoningEfforts": {
-        "stealth/space-bunny-alpha": "high"
+        "stealth/space-bunny-alpha": "max"
       },
       "modelReasoningEffortMap": {
         "stealth/space-bunny-alpha": {
@@ -361,8 +362,8 @@
           "medium": "medium",
           "high": "high",
           "xhigh": "xhigh",
-          "max": "xhigh",
-          "ultra": "xhigh",
+          "max": "max",
+          "ultra": "max",
           "minimal": "low"
         }
       },
@@ -483,7 +484,7 @@
     "space-bunny-desktop": {
       "strategy": "failover",
       "stickyLimit": 1,
-      "defaultEffort": "high",
+      "defaultEffort": "max",
       "targets": [
         {
           "provider": "openrouter",
