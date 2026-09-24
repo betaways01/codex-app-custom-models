@@ -14,6 +14,7 @@ This repository is a portable template. It contains no live API keys and no mach
 | MiMo V2.5 Pro | mimo-v2.5-pro | Flat-rate daily coding |
 | GLM 5.3 | glm-5.3 | Hard reasoning |
 | GLM 5.3 Flash | glm-5.3-flash | Volume work |
+| Space Bunny Alpha | stealth/space-bunny-alpha | Free stealth model, vision, 1M ctx |
 
 Path: Codex App -> OpenCodex on 127.0.0.1:10100 -> provider API. One hop. No extra router.
 
