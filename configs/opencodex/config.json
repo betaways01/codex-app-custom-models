@@ -499,12 +499,7 @@
     "combo/grok-47-desktop",
     "combo/grok-47-fast-desktop",
     "gpt-5.6-sol",
-    "gpt-5.6-luna",
-    "combo/mimo-desktop",
-    "combo/mimo-pro-desktop",
-    "combo/glm-53-desktop",
-    "combo/glm-53-flash-desktop",
-    "combo/space-bunny-desktop"
+    "gpt-5.6-luna"
   ],
   "subagentModels": [
     "gpt-5.6-sol",
@@ -523,6 +518,11 @@
     "zai/glm-5.3-flash",
     "openrouter/stealth/space-bunny-alpha",
     "openrouter/stealth/ox-alpha",
-    "openrouter/anthropic/claude-sonnet-5"
+    "openrouter/anthropic/claude-sonnet-5",
+    "combo/space-bunny-desktop",
+    "combo/glm-53-desktop",
+    "combo/glm-53-flash-desktop",
+    "combo/mimo-desktop",
+    "combo/mimo-pro-desktop"
   ]
 }
